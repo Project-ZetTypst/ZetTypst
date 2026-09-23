@@ -9,4 +9,4 @@ cargo build -p zettyp-lsp --release --locked
 cargo run -p zettyp-lsp -- --root .
 ```
 
-Licensed under [MIT](../LICENSE).
+[MIT](../LICENSE).

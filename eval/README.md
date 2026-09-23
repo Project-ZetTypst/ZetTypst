@@ -11,4 +11,4 @@ cargo run -p zettyp-eval -- main.typ --root . --input key=value
 cargo run -p zettyp-eval -- serve --root . --socket /tmp/zettyp-eval.sock
 ```
 
-Licensed under [MIT](../LICENSE).
+[MIT](../LICENSE).

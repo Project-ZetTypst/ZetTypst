@@ -16,4 +16,4 @@ python3 scripts/install-local.py
 
 Use `--package-path .dev/packages` with Typst, `zettyp-eval`, or `zettyp-lsp`; configure the editor likewise.
 
-[MIT License](LICENSE).
+[MIT](LICENSE).
