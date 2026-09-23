@@ -1,0 +1,190 @@
+name: LSP
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lsp-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Determine version and release intent
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path("lsp/Cargo.toml").read_text())["package"]["version"]
+          release = False
+          if os.environ["REF"] == "refs/heads/main":
+              if os.environ["EVENT"] == "workflow_dispatch":
+                  release = True
+              elif os.environ["EVENT"] == "push":
+                  before = os.environ["BEFORE"]
+                  previous = subprocess.run(
+                      ["git", "show", f"{before}:lsp/Cargo.toml"],
+                      capture_output=True, text=True,
+                  )
+                  if previous.returncode == 0:
+                      old = tomllib.loads(previous.stdout)["package"]["version"]
+                      release = old != version
+                  elif not before.strip("0"):
+                      release = True
+                  else:
+                      # A newly introduced crate also constitutes a first release.
+                      subprocess.run(["git", "cat-file", "-e", before], check=True)
+                      exists = subprocess.run(
+                          ["git", "ls-tree", before, "--", "lsp/Cargo.toml"],
+                          capture_output=True, text=True, check=True,
+                      )
+                      if exists.stdout.strip():
+                          raise RuntimeError(previous.stderr)
+                      release = True
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\nrelease={str(release).lower()}\n")
+          PY
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up stable Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup target add --toolchain stable "${{ matrix.target }}"
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+      - name: Check formatting
+        shell: bash
+        run: cargo +stable fmt --all -- --check
+      - name: Build
+        shell: bash
+        run: cargo +stable build --release --locked -p zettyp-lsp --target "${{ matrix.target }}"
+      - name: Package distribution
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          python - <<'PY'
+          import os
+          import shutil
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          target = os.environ["TARGET"]
+          name = f"zettyp-lsp-v{os.environ['VERSION']}-{target}"
+          windows = "windows" in target
+          binary = "zettyp-lsp.exe" if windows else "zettyp-lsp"
+          stage = Path("dist") / name
+          stage.mkdir(parents=True)
+          shutil.copy2(Path("target") / target / "release" / binary, stage / binary)
+          shutil.copy2("LICENSE", stage / "LICENSE")
+          shutil.copy2("lsp/README.md", stage / "README.md")
+          if windows:
+              with zipfile.ZipFile(f"dist/{name}.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+                  for path in sorted(stage.iterdir()):
+                      archive.write(path, f"{name}/{path.name}")
+          else:
+              with tarfile.open(f"dist/{name}.tar.gz", "w:gz") as archive:
+                  archive.add(stage, arcname=name)
+          shutil.rmtree(stage)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zettyp-lsp-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: [version, build]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: zettyp-lsp-*
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum *.tar.gz *.zip > SHA256SUMS
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="zettyp-lsp-v${VERSION}"
+          # Never overwrite a published version. A failed draft can be retried
+          # only from the same commit, so its tag and binaries stay consistent.
+          if gh release view "$tag" --json isDraft --jq '.isDraft' > draft.txt; then
+            if [ "$(<draft.txt)" != "true" ]; then
+              echo "Release $tag is already published; bump the version for a new release."
+              exit 1
+            fi
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            git fetch origin "refs/tags/$tag:refs/tags/$tag"
+            test "$(git rev-parse "$tag^{commit}")" = "$GITHUB_SHA" || {
+              echo "Tag $tag points to another commit."
+              exit 1
+            }
+          else
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$tag"
+          fi
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            gh release create "$tag" --verify-tag --draft \
+              --title "zettyp-lsp v${VERSION}" --generate-notes
+          fi
+          gh release upload "$tag" dist/* --clobber
+          if [[ "$VERSION" == *-* ]]; then
+            gh release edit "$tag" --draft=false --prerelease
+          else
+            gh release edit "$tag" --draft=false
+          fi
