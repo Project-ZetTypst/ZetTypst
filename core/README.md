@@ -11,9 +11,9 @@ Import:
 Local development:
 
 ```sh
-python3 core/scripts/install-local.py
+python3 scripts/install-local.py
 ```
 
-Use `--package-path .dev/packages` with Typst or `zettyp-eval`; configure the editor likewise.
+Use `--package-path .dev/packages` with Typst, `zettyp-eval`, or `zettyp-lsp`; configure the editor likewise.
 
 [MIT License](LICENSE).
