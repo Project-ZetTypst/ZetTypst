@@ -1,0 +1,20 @@
+[package]
+name = "zettyp-eval"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Persistent Typst evaluation and source provenance for ZetTypst"
+
+[dependencies]
+anyhow = "1"
+chrono = "0.4"
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+typst = "0.14.2"
+typst-kit = { version = "0.14.2", default-features = false, features = [
+  "embed-fonts",
+  "packages",
+] }
