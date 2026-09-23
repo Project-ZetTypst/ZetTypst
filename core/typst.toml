@@ -1,0 +1,8 @@
+[package]
+name = "zettyp-core"
+version = "0.1.0"
+entrypoint = "lib.typ"
+authors = ["Xinyu Xiang"]
+license = "MIT"
+description = "Model knowledge graphs with source-anchored states."
+keywords = ["zettelkasten", "knowledge", "graph", "semantics"]
