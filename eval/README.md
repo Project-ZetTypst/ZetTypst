@@ -1,7 +1,6 @@
 # zettyp-eval
 
 Persistent Typst evaluation and source provenance, available as a Rust library and CLI. 
-Collects `eval.announcement` values and externalizes `eval.inspect` source locations without interpreting note semantics or executing effects.
 
 From the workspace root:
 
