@@ -8,12 +8,4 @@ Import:
 #import "@preview/zettyp-core:0.1.0": eval, graph, node
 ```
 
-Local development:
-
-```sh
-python3 scripts/install-local.py
-```
-
-Use `--package-path .dev/packages` with Typst, `zettyp-eval`, or `zettyp-lsp`; configure the editor likewise.
-
 [MIT](LICENSE).

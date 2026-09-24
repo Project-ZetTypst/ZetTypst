@@ -7,4 +7,4 @@ A Typst-native Zettelkasten note system, where the document language also serves
 - [`lsp/`](lsp/): Editor integration and Typst wrappers for selected LSP capabilities
 - [`kickstart/`](kickstart/): An example configuration
 
-[MIT](LICENSE).
+[Contributing](CONTRIBUTING.md) [MIT](LICENSE).
