@@ -2,10 +2,11 @@
 #import "@preview/zettyp-core:0.1.0": eval
 #import ".zettypst/zk/source.typ": load
 #import ".zettypst/zk/graph.typ": build
+#import ".zettypst/zk/relation.typ": derive
 
 #let notes = load()
 #let initial = build(notes.map(note => note.local))
-#let graph-state = initial.graph
+#let graph-state = derive(initial.graph)
 
 // Export observed identities and provenance without exporting full note bodies.
 #eval.announce(<zk.notes>, graph-state
