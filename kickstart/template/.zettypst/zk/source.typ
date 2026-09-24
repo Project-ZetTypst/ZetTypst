@@ -29,10 +29,10 @@
       message: "source has no zettel declaration: " + path,
     )
     for record in records {
-      let id = record.state.value.id
+      let id = record.local.node.value.id
       assert(id not in ids, message: "duplicate note ID: " + repr(id))
       ids.push(id)
-      notes.push((state: record.state, body: record.body, path: path))
+      notes.push((local: record.local, body: record.body, path: path))
     }
   }
   notes

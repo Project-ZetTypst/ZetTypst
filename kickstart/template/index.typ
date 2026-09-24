@@ -1,16 +1,36 @@
 // Editable whole-project entrypoint. The manifest records paths, not IDs.
 #import "@preview/zettyp-core:0.1.0": eval
 #import ".zettypst/zk/source.typ": load
+#import ".zettypst/zk/graph.typ": build
 
 #let notes = load()
+#let initial = build(notes.map(note => note.local))
+#let graph-state = initial.graph
 
 // Export observed identities and provenance without exporting full note bodies.
-#eval.announce(<zk.notes>, notes.map(note => (
-  id: str(note.state.value.id),
-  title: note.state.value.title,
-  metadata: note.state.value.metadata,
-  path: note.path,
-  origin: eval.inspect(note.state.origin),
+#eval.announce(<zk.notes>, graph-state
+  .value
+  .nodes
+  .enumerate()
+  .map(((index, node)) => (
+    id: str(node.id),
+    title: node.title,
+    metadata: node.metadata,
+    path: notes.at(index).path,
+    origin: eval.inspect(graph-state.origin.nodes.at(index)),
+  )))
+
+#eval.announce(<zk.graph>, (
+  value: graph-state.value,
+  origin: (
+    nodes: graph-state.origin.nodes.map(eval.inspect),
+    edges: graph-state.origin.edges.map(eval.inspect),
+  ),
+))
+
+#eval.announce(<zk.references.unclassified>, initial.unclassified.map(edge => (
+  value: edge.value,
+  origin: eval.inspect(edge.origin),
 )))
 
 // Use the target heading's title for ordinary references.
