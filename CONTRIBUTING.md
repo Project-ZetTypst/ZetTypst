@@ -57,7 +57,7 @@ cargo run -p zettyp-eval -- serve --root kickstart/template --socket .dev/zettyp
 
 Use the same absolute `.dev/packages` path in all tools. Launch the editor from the activated shell or configure that path explicitly in its project settings. An already-running editor does not inherit later shell changes.
 
-For Kickstart, configure Tinymist's project root as `kickstart/template/` and its main entry as `index.typ`. The local `zettyp-lsp` binary is `target/release/zettyp-lsp`; pass `--root` with that project directory and use initialization options `{"entry": "index.typ"}`. Tinymist's usual language features and the announcement-driven LSP are separate services. Kickstart's LSP policies are not wired up yet.
+For Kickstart, configure Tinymist's project root as `kickstart/template/` and its main entry as `index.typ`. The local `zettyp-lsp` binary is `target/release/zettyp-lsp`; pass `--root` with that project directory and use initialization options `{"entry": "lsp.typ"}`. Tinymist's usual language features and the announcement-driven LSP are separate services. Kickstart's `lsp.typ` evaluates Definition, References, and Hover policies without rendering note bodies; the policies are exposed through `.zettypst/zk/lsp.typ` and implemented separately under `.zettypst/zk/lsp/`.
 
 ## Checks
 
