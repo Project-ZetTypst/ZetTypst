@@ -86,7 +86,7 @@ fn rpc_evaluates_then_shuts_down() {
     let socket = fixture.0.join("rpc.sock");
     let mut process = Process(
         Command::new(env!("CARGO_BIN_EXE_zettyp-eval"))
-            .args(["serve", "--root"])
+            .args(["serve", "--ignore-system-fonts", "--root"])
             .arg(&fixture.0)
             .arg("--socket")
             .arg(&socket)
@@ -96,10 +96,19 @@ fn rpc_evaluates_then_shuts_down() {
     );
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut stream = loop {
-        if let Ok(stream) = UnixStream::connect(&socket) {
-            break stream;
+        let error = match UnixStream::connect(&socket) {
+            Ok(stream) => break stream,
+            Err(error) => error,
+        };
+        if let Some(status) = process.0.try_wait().unwrap() {
+            panic!(
+                "server exited before accepting connections: {status}; last connection error: {error}"
+            );
         }
-        assert!(Instant::now() < deadline, "server did not start");
+        assert!(
+            Instant::now() < deadline,
+            "server did not start; last connection error: {error}",
+        );
         std::thread::sleep(Duration::from_millis(10));
     };
     stream
