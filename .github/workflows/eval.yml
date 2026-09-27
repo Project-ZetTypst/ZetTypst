@@ -99,6 +99,9 @@ jobs:
       - name: Build
         shell: bash
         run: cargo +stable build --release --locked -p zettyp-eval --target "${{ matrix.target }}"
+      - name: Test
+        shell: bash
+        run: cargo +stable test --release --locked -p zettyp-eval --target "${{ matrix.target }}"
       - name: Package distribution
         shell: bash
         env:

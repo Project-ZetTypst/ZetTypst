@@ -94,7 +94,9 @@ fn rpc_evaluates_then_shuts_down() {
             .spawn()
             .unwrap(),
     );
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // Allow cold font initialization on slower or contended CI runners.
+    let timeout = Duration::from_secs(30);
+    let deadline = Instant::now() + timeout;
     let mut stream = loop {
         let error = match UnixStream::connect(&socket) {
             Ok(stream) => break stream,
@@ -111,9 +113,7 @@ fn rpc_evaluates_then_shuts_down() {
         );
         std::thread::sleep(Duration::from_millis(10));
     };
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .unwrap();
+    stream.set_read_timeout(Some(timeout)).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut call = |id, method, params| -> Value {
         serde_json::to_writer(

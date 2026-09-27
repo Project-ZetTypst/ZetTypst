@@ -12,4 +12,4 @@ Persistent server (Unix only):
 zettyp-eval serve --root . --socket /tmp/zettyp-eval.sock
 ```
 
-[MIT](../LICENSE).
+[MIT](LICENSE).
