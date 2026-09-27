@@ -11,5 +11,5 @@
 This note is loaded through `.zettypst/source.toml`.
 Its label declares its identity; changing the title or file path does not change that identity.
 
-Edit `.zettypst/zk/metadata/schema.typ` to customize shared metadata defaults.
+Edit `.zettypst/lib.typ` to customize shared metadata defaults and policies.
 Use `zk_metadata.with(...)` to override only this note's differences.

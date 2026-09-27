@@ -3,6 +3,20 @@
 )
 #import "@preview/zettyp-lsp:0.1.0" as lsp
 
+// Persist this label in source; used contains the assembled string identities.
+#let allocate-id(now, used) = {
+  assert(type(now) == datetime and now.year() != none and now.hour() != none)
+  assert(type(used) == array and used.all(id => type(id) == str))
+  let base = now.display("[year][month][day]T[hour][minute][second]")
+  let candidate = base
+  let suffix = 0
+  while candidate in used {
+    suffix += 1
+    candidate = base + "-" + str(suffix)
+  }
+  label(candidate)
+}
+
 #let lifecycle = vocabulary.register(
   "lifecycle",
   active: "active",
