@@ -131,3 +131,31 @@
   ))
 }
 #let observations(body) = declarations(body, "zettyp.note")
+
+// Loading is explicit: importing this configuration never reads the manifest.
+#let load(manifest: "/.zettypst/source.toml") = {
+  let paths = toml(manifest).at("paths", default: none)
+  assert(
+    type(paths) == array and paths.all(path => type(path) == str),
+    message: "source manifest requires an array of paths",
+  )
+  assert.eq(paths.dedup().len(), paths.len(), message: "duplicate source path")
+  assert(
+    paths.all(path => (
+      not path.contains("\\")
+        and path.split("/").all(part => part not in ("", ".", ".."))
+    )),
+    message: "source paths must be project-relative with forward slashes",
+  )
+  let notes = paths
+    .map(path => {
+      let records = observations(include ("/" + path))
+      assert(
+        records.len() > 0,
+        message: "source has no zettel declaration: " + path,
+      )
+      records.map(record => record + (path: path))
+    })
+    .flatten()
+  knowledge.assemble(notes.map(note => note.local)) + (notes: notes)
+}
