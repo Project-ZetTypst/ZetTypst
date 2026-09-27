@@ -99,6 +99,9 @@ jobs:
       - name: Build
         shell: bash
         run: cargo +stable build --release --locked -p zettyp-lsp --target "${{ matrix.target }}"
+      - name: Test workspace
+        shell: bash
+        run: cargo +stable test --workspace --release --locked --target "${{ matrix.target }}"
       - name: Package distribution
         shell: bash
         env:
