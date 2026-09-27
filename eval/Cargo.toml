@@ -12,6 +12,18 @@ description = "Persistent Typst evaluation and source provenance for ZetTypst"
 name = "core-knowledge-local-to-observable"
 path = "../core/knowledge/tests/local-to-observable/test.rs"
 
+[[test]]
+name = "core-policy-assembly-to-observable"
+path = "../core/policy/tests/assembly-to-observable/test.rs"
+
+[[test]]
+name = "core-policy-evaluation-to-observable"
+path = "../core/policy/tests/evaluation-to-observable/test.rs"
+
+[[test]]
+name = "core-policy-verified-observation"
+path = "../core/policy/tests/verified-observation/test.rs"
+
 [dependencies]
 anyhow = "1"
 chrono = "0.4"
