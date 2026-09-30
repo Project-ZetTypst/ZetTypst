@@ -1,4 +1,5 @@
 mod snapshot_tests;
+mod host_tests;
 
 use super::*;
 use crossbeam_channel::unbounded;
@@ -21,6 +22,7 @@ fn server(connection: &Connection) -> (Server<'_>, crossbeam_channel::Receiver<J
         watch_registration: false,
         relative_patterns: false,
         work_done_progress: true,
+        host_write_root: None,
     };
     (
         Server {

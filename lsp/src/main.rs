@@ -1,3 +1,4 @@
+mod host;
 mod progress;
 mod server;
 mod snapshot;

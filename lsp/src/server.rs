@@ -32,16 +32,27 @@ struct Config {
     watch_registration: bool,
     relative_patterns: bool,
     work_done_progress: bool,
+    host_write_root: Option<PathBuf>,
 }
 
 impl Config {
     #[allow(deprecated)]
     fn from_initialize(params: InitializeParams, root: Option<PathBuf>) -> Result<Self> {
-        let evaluation: EvalParams = serde_json::from_value(
-            params
-                .initialization_options
-                .context("initializationOptions must contain entry and optional inputs")?,
-        )?;
+        let host_write_root = params
+            .initialization_options
+            .as_ref()
+            .and_then(|options| options.get("hostWriteRoot"))
+            .map(|value| {
+                crate::host::relative(value.as_str().context("hostWriteRoot must be a string")?)
+            })
+            .transpose()?;
+        let mut options = params
+            .initialization_options
+            .context("initializationOptions must contain entry and optional inputs")?;
+        if let Some(options) = options.as_object_mut() {
+            options.remove("hostWriteRoot");
+        }
+        let evaluation: EvalParams = serde_json::from_value(options)?;
         evaluation.validate()?;
         if let Some(folders) = &params.workspace_folders {
             ensure!(
@@ -90,6 +101,7 @@ impl Config {
             watch_registration: enabled("/workspace/didChangeWatchedFiles/dynamicRegistration"),
             relative_patterns: enabled("/workspace/didChangeWatchedFiles/relativePatternSupport"),
             work_done_progress: enabled("/window/workDoneProgress"),
+            host_write_root,
         })
     }
 
@@ -640,9 +652,17 @@ impl Server<'_> {
                         // Failure to write the log is handled by subsequent protocol IO.
                         let _ = self.log(MessageType::WARNING, warning);
                     }
+                    let writes = crate::host::Writes::prepare(
+                        &output.output,
+                        &self.config.root,
+                        self.config.host_write_root.as_deref(),
+                        self.documents.keys().cloned(),
+                    )
+                    .map_err(invalid_output)?;
                     let values: Announcements = serde_json::from_value(output.output)
                         .map_err(|error| invalid_output(error.into()))?;
                     let publications = values.publications(&view).map_err(invalid_output)?;
+                    writes.commit(&self.config.root).map_err(invalid_output)?;
                     Ok((values, publications))
                 });
                 self.cache = Some(match values {
