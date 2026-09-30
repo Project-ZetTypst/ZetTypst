@@ -1,0 +1,100 @@
+/* Card content: Typst's HTML over Forester's vendored stylesheet.
+
+   Vertical rhythm follows a paper page. Display math, diagrams and list
+   boundaries sit in the flow like lines of text: each keeps half the leading
+   on either side, so together with the neighbouring line's own half-leading
+   the gap equals the ordinary space between two lines. */
+
+[data-zk-node] {
+  --zk-line: 1.55;                                  /* Forester's line height */
+  --zk-half-leading: calc((var(--zk-line) - 1) * 0.5em);
+  --zk-math-size: 1.08;                             /* NewCM beside Inria Sans */
+}
+
+/* ---- Tree markup --------------------------------------------------------- */
+
+
+[data-zk-node] > details > summary { cursor: pointer; }
+[data-zk-node] > details > summary > header { display: block; margin-bottom: 0.5em; }
+[data-zk-node] > details > summary > header > h1 { font-size: 1.5em; display: inline; }
+[data-zk-node] > footer { margin-top: 2.5em; }
+
+.slug a { color: var(--zk-muted); font-weight: 300; }
+.slug a:hover { background: var(--zk-hover); }
+.status { font-weight: bolder; color: #444; text-transform: uppercase; font-size: 0.85em; letter-spacing: 0.04em; }
+
+[data-zk-node] a[href]:not(.slug a) {
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+[data-zk-node] a[href]:not(.slug a):hover { background: var(--zk-hover); }
+[data-zk-node] a[href^="http"] { border-bottom-style: solid; }
+.zk-unpublished { color: var(--zk-muted); font-style: italic; }
+
+/* Collapsed backmatter trees expand in place, Forester style. */
+details[data-zk-expand] > summary h1::before {
+  content: "▸";
+  display: inline-block;
+  width: 1em;
+  color: #aaa;
+  transition: transform 0.15s;
+}
+details[data-zk-expand][open] > summary h1::before { transform: rotate(90deg); }
+details[data-zk-expand][data-loaded="loading"] > summary h1::before { opacity: 0.4; }
+details[data-zk-expand] > .mainmatter { padding: 0.2em 0 0.4em 1em; }
+footer .block { margin-left: -5px; }
+
+
+
+code, pre { hyphens: none; }
+
+/* ---- Math (MathJax CHTML, typeset at build time) ------------------------- */
+
+[data-zk-node] mjx-container[jax="CHTML"] { font-size: calc(var(--zk-math-size) * 100%); }
+/* Inline math never loosens the line spacing. */
+[data-zk-node] mjx-container[jax="CHTML"]:not([display="true"]) { line-height: 0; }
+[data-zk-node] mjx-container[jax="CHTML"][display="true"] {
+  margin: var(--zk-half-leading) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ---- Frames: layout Typst renders as SVG (diagrams, cancel, stacks) ------ */
+
+[data-zk-node] :is(.zk-frame, div[style^="text-align"]):has(> svg) {
+  margin: var(--zk-half-leading) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+[data-zk-node] :is(.zk-frame, div[style^="text-align: center"]) > svg { margin-inline: auto; }
+/* An inline frame ends at the baseline; its descent overflows below. */
+[data-zk-node] :not(div) > svg { vertical-align: baseline; }
+
+/* ---- Flow: display blocks and lists continue the paragraph --------------- */
+
+[data-zk-node] p:has(+ :is(mjx-container[display="true"], .zk-frame, div[style^="text-align"], ul, ol)) {
+  margin-bottom: 0;
+}
+[data-zk-node] :is(mjx-container[display="true"], .zk-frame) + :is(mjx-container[display="true"], .zk-frame) {
+  margin-top: calc(2 * var(--zk-half-leading));
+}
+[data-zk-node] :is(ul, ol):not(.metadata *) {
+  margin-block: var(--zk-half-leading);
+  padding-block: 0;
+}
+[data-zk-node] li:not(.metadata *) { margin: 0; }
+[data-zk-node] li > :is(ul, ol) { margin-block: 0; }
+[data-zk-node] li > p { margin-block: 0; }
+
+/* ---- The default `about` view: metadata as a compact definition list ------ */
+
+.zk-about {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.15em 1em;
+  margin: 0;
+}
+.zk-about dt { color: var(--zk-muted, #808080); }
+.zk-about dd { margin: 0; }

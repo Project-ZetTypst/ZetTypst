@@ -1,0 +1,25 @@
+{
+  "name": "zettypst-site",
+  "version": "0.1.0",
+  "description": "Astro integration that publishes a ZetTypst project as a Forester-style site with stacked reading.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/integration.mjs"
+  },
+  "files": [
+    "src",
+    "theme"
+  ],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\""
+  },
+  "peerDependencies": {
+    "astro": "^5.16.0"
+  },
+  "dependencies": {
+    "@mathjax/mathjax-newcm-font": "4.1.3",
+    "@mathjax/src": "4.1.3",
+    "node-html-parser": "^7.0.1"
+  }
+}

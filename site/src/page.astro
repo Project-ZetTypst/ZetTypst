@@ -1,0 +1,63 @@
+---
+// Every Typst document becomes one page: its sections are placed, untouched,
+// as the first pane of the reading stack.
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { parse } from 'node-html-parser';
+import '../theme/forester.css';
+import './styles/workspace.css';
+import './styles/card.css';
+import favicon from '../theme/favicon.ico?url';
+
+export function getStaticPaths() {
+  const stage = import.meta.env.ZETTYPST_STAGE;
+  const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+    .flatMap(entry => entry.isDirectory()
+      ? walk(join(dir, entry.name))
+      : entry.name.endsWith('.html') ? [relative(stage, join(dir, entry.name))] : []);
+  return walk(stage).map(file => ({
+    // `a/index.html` is served at `a/`; Typst's hrefs name the file itself.
+    params: { path: file.replace(/(^|\/)index\.html$/, '') || undefined },
+    props: { file },
+  }));
+}
+
+const { file } = Astro.props;
+const source = parse(readFileSync(join(import.meta.env.ZETTYPST_STAGE, file), 'utf8'));
+const cards = source.querySelectorAll('body > section[data-zk-node]');
+if (cards.length === 0) throw new Error(`${file} contains no [data-zk-node] section`);
+const title = source.querySelector('title')?.text ?? '';
+const lang = source.querySelector('html')?.getAttribute('lang') ?? 'en';
+const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
+---
+<!doctype html>
+<html lang={lang}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href={favicon} />
+    <link rel="stylesheet" href={`${base}_zettypst/math.css`} />
+    <meta name="zk-manifest" content={`${base}zettypst.json`} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <header class="zk-bar">
+      <a class="zk-home" href={base} title="Home">« Home</a>
+      <button class="zk-search" type="button" title="Search notes">
+        Search <kbd>⌘K</kbd>
+      </button>
+    </header>
+    <main class="zk-stack">
+      <div class="zk-pane" data-page={file}>
+        <article set:html={cards.map(card => card.outerHTML).join('')} />
+      </div>
+    </main>
+    <dialog class="zk-palette" aria-label="Search notes">
+      <input type="text" placeholder="Start typing a note title or ID" autocomplete="off" />
+      <ul role="listbox"></ul>
+    </dialog>
+    <script>
+      import './client/main.ts';
+    </script>
+  </body>
+</html>
