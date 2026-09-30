@@ -319,21 +319,27 @@
     .filter(((id, edge)) => (
       project.state.values.edges.at(id).relation == colors.ref
     ))
-  let nodes = project.state.graph.nodes.map(id => (
-    id: id,
-    origin: project.origins.nodes.at(id),
-    definition: project.origins.nodes.at(id),
-    references: edges
-      .filter(pair => pair.at(1).target == id)
-      .map(pair => project.origins.edges.at(pair.at(0))),
-  ))
+  let incoming = (:)
+  for (edge-id, edge) in edges {
+    let occurrences = incoming.at(edge.target, default: ())
+    occurrences.push(project.origins.edges.at(edge-id))
+    incoming.insert(edge.target, occurrences)
+  }
+  let nodes = (:)
+  for id in project.state.graph.nodes {
+    nodes.insert(id, (
+      id: id,
+      origin: project.origins.nodes.at(id),
+      definition: project.origins.nodes.at(id),
+      references: incoming.at(id, default: ()),
+    ))
+  }
   // A reference inside a heading takes priority over the heading's range.
   (
     edges.map(((id, edge)) => (
-      nodes.find(node => node.id == edge.target)
-        + (origin: project.origins.edges.at(id))
+      nodes.at(edge.target) + (origin: project.origins.edges.at(id))
     ))
-      + nodes
+      + project.state.graph.nodes.map(id => nodes.at(id))
   )
 }
 
@@ -393,9 +399,12 @@
     ))
   }
   if final.status == "available" {
-    let notes = project-notes(project, final.value)
+    let notes = (:)
+    for note in project-notes(project, final.value) {
+      notes.insert(note.id, note)
+    }
     for target in targets {
-      let note = notes.find(note => note.id == target.id)
+      let note = notes.at(target.id)
       lsp.announce(lsp.effect-kinds.hover, lsp.hover(
         applies-to: target.origin,
         contents: (
