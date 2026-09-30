@@ -30,8 +30,12 @@ chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 typst = "0.14.2"
 typst-kit = { version = "0.14.2", default-features = false, features = [
   "embed-fonts",
   "packages",
 ] }
+
+[dev-dependencies]
+tempfile = "3"

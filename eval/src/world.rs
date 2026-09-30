@@ -3,6 +3,9 @@ use std::fs;
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::dependencies::{Dependencies, Dependency, PackageDependency, content_hash, value_hash};
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Datelike, FixedOffset, Local};
@@ -19,7 +22,7 @@ use typst_kit::package::PackageStorage;
 
 /// Host environment shared by all evaluations in a runtime.
 /// Fonts are discovered when the runtime is created.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct WorldOptions {
     pub font_paths: Vec<PathBuf>,
     pub ignore_system_fonts: bool,
@@ -40,6 +43,9 @@ pub struct ProjectWorld {
     packages: PackageStorage,
     package_roots: Mutex<HashMap<PackageSpec, PathBuf>>,
     now: DateTime<Local>,
+    observed_book: AtomicBool,
+    observed_font: AtomicBool,
+    observed_today: AtomicBool,
 }
 
 impl ProjectWorld {
@@ -82,6 +88,9 @@ impl ProjectWorld {
             packages,
             package_roots: Mutex::new(HashMap::new()),
             now: Local::now(),
+            observed_book: AtomicBool::new(false),
+            observed_font: AtomicBool::new(false),
+            observed_today: AtomicBool::new(false),
         })
     }
 
@@ -165,6 +174,71 @@ impl ProjectWorld {
         }
     }
 
+    /// Capture hashes of bytes actually consumed, not a later disk observation.
+    pub fn dependencies(&self) -> Dependencies {
+        let mut result = Dependencies {
+            files: Vec::new(),
+            packages: Vec::new(),
+            font_book: self
+                .observed_book
+                .load(Ordering::Relaxed)
+                .then(|| value_hash(&*self.book)),
+            unsupported: None,
+        };
+        // Sticky for this Runtime: cached Typst calls may retain earlier values.
+        if self.observed_today.load(Ordering::Relaxed) {
+            result.unsupported = Some("time-dependent evaluation".into());
+        }
+        if self.observed_font.load(Ordering::Relaxed) {
+            result.unsupported =
+                Some("font bytes were used; persistent validation is unsupported".into());
+        }
+        for (id, slot) in self
+            .slots
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, slot)| slot.accessed)
+        {
+            match (&slot.bytes, self.path_for(*id)) {
+                (Some(Ok(bytes)), Ok(path)) => result.files.push(Dependency {
+                    path,
+                    hash: content_hash(bytes),
+                }),
+                _ => result.unsupported = Some("failed or unresolved file read".into()),
+            }
+        }
+        for (spec, resolved) in self.package_roots.lock().unwrap().iter() {
+            let suffix = format!("{}/{}/{}", spec.namespace, spec.name, spec.version);
+            let candidates = [
+                self.packages.package_path(),
+                self.packages.package_cache_path(),
+            ]
+            .into_iter()
+            .flatten()
+            .map(|path| path.join(&suffix))
+            .collect();
+            result.packages.push(PackageDependency {
+                candidates,
+                resolved: resolved.clone(),
+            });
+        }
+        result.files.sort_by(|a, b| a.path.cmp(&b.path));
+        result
+    }
+
+    pub fn validates(
+        &self,
+        dependencies: &Dependencies,
+        sources: &BTreeMap<PathBuf, String>,
+    ) -> bool {
+        dependencies
+            .font_book
+            .as_ref()
+            .is_none_or(|hash| *hash == value_hash(&*self.book))
+            && dependencies.matches(&self.root, sources)
+    }
+
     fn with_slot<T>(&self, id: FileId, f: impl FnOnce(&mut FileSlot) -> T) -> T {
         let mut slots = self.slots.lock().unwrap();
         let slot = slots.entry(id).or_default();
@@ -194,6 +268,7 @@ impl World for ProjectWorld {
     }
 
     fn book(&self) -> &LazyHash<FontBook> {
+        self.observed_book.store(true, Ordering::Relaxed);
         &self.book
     }
 
@@ -210,10 +285,12 @@ impl World for ProjectWorld {
     }
 
     fn font(&self, index: usize) -> Option<Font> {
+        self.observed_font.store(true, Ordering::Relaxed);
         self.fonts.get(index)?.get()
     }
 
     fn today(&self, offset: Option<i64>) -> Option<Datetime> {
+        self.observed_today.store(true, Ordering::Relaxed);
         let date = match offset {
             None => self.now.date_naive(),
             Some(hours) => {

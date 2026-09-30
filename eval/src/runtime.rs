@@ -6,7 +6,7 @@ use anyhow::Result;
 use typst::diag::Warned;
 use typst::foundations::{Dict, Value};
 
-use crate::{ProjectWorld, SourceSnapshot, WorldOptions, eval};
+use crate::{Dependencies, ProjectWorld, SourceSnapshot, WorldOptions, eval};
 
 /// One completed attempt, successful or not, with its original source provenance.
 /// Retaining this value keeps ordinary Typst Content spans usable after edits.
@@ -14,6 +14,7 @@ pub struct Evaluation {
     pub revision: u64,
     pub result: Warned<Result<Value>>,
     pub sources: SourceSnapshot,
+    pub dependencies: Dependencies,
 }
 
 /// A single project's long-lived evaluator. Requests are evaluated sequentially.
@@ -69,10 +70,19 @@ impl Runtime {
             revision: self.revision,
             result,
             sources,
+            dependencies: self.world.dependencies(),
         });
         self.latest = Some(evaluation.clone());
         typst::comemo::evict(10);
         Ok(evaluation)
+    }
+
+    pub fn validates(
+        &self,
+        dependencies: &Dependencies,
+        sources: &BTreeMap<PathBuf, String>,
+    ) -> bool {
+        self.world.validates(dependencies, sources)
     }
 
     pub fn latest(&self) -> Option<&Arc<Evaluation>> {
