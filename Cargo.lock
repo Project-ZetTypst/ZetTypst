@@ -3531,10 +3531,12 @@ dependencies = [
  "anyhow",
  "clap",
  "crossbeam-channel",
+ "libc",
  "lsp-server",
  "lsp-types",
  "serde",
  "serde_json",
+ "tempfile",
  "typst",
  "zettyp-eval",
 ]

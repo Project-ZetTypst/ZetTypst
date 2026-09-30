@@ -1,4 +1,6 @@
+mod progress;
 mod server;
+mod snapshot;
 mod values;
 mod worker;
 

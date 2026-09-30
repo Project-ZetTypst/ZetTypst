@@ -10,10 +10,14 @@ use lsp_server::{
 };
 use lsp_types::*;
 use serde_json::{Value, json};
-use zettyp_eval::WorldOptions;
+use zettyp_eval::{Dependencies, WorldOptions};
 
+use crate::progress::Progress;
 use crate::values::{Announcements, Query, View};
-use crate::worker::{EvalParams, Job, Output, Worker, failure};
+use crate::worker::{EvalParams, Event, Job, Output, Worker, failure};
+
+#[cfg(test)]
+mod tests;
 
 const DEBOUNCE: Duration = Duration::from_millis(120);
 const WATCH_ID: &str = "zettyp/watch";
@@ -27,6 +31,7 @@ struct Config {
     diagnostic_versions: bool,
     watch_registration: bool,
     relative_patterns: bool,
+    work_done_progress: bool,
 }
 
 impl Config {
@@ -84,6 +89,7 @@ impl Config {
             diagnostic_versions: enabled("/textDocument/publishDiagnostics/versionSupport"),
             watch_registration: enabled("/workspace/didChangeWatchedFiles/dynamicRegistration"),
             relative_patterns: enabled("/workspace/didChangeWatchedFiles/relativePatternSupport"),
+            work_done_progress: enabled("/window/workDoneProgress"),
         })
     }
 
@@ -127,6 +133,9 @@ struct Server<'a> {
     connection: &'a Connection,
     config: Config,
     worker: Worker,
+    progress: Progress,
+    index_ready: bool,
+    restored_dependencies: Option<Dependencies>,
     documents: BTreeMap<PathBuf, Document>,
     generation: u64,
     active: Option<Active>,
@@ -169,6 +178,9 @@ pub fn run(connection: &Connection, root: Option<PathBuf>, options: WorldOptions
     }))?;
     let mut server = Server {
         connection,
+        progress: Progress::new(config.work_done_progress),
+        index_ready: false,
+        restored_dependencies: None,
         config,
         worker,
         documents: BTreeMap::new(),
@@ -190,6 +202,7 @@ impl Server<'_> {
     fn run(&mut self) -> Result<()> {
         loop {
             self.schedule()?;
+            self.progress.tick(self.connection, Instant::now())?;
             let delay = if self.active.is_none() && !self.shutdown {
                 self.due
                     .map(|due| due.saturating_duration_since(Instant::now()))
@@ -197,6 +210,9 @@ impl Server<'_> {
             } else {
                 Duration::from_secs(86400)
             };
+            let delay = self.progress.deadline().map_or(delay, |due| {
+                delay.min(due.saturating_duration_since(Instant::now()))
+            });
             // Process already-received source changes before publishing a completion.
             select_biased! {
                 recv(self.connection.receiver) -> message => {
@@ -215,6 +231,9 @@ impl Server<'_> {
                         Message::Response(response) if !self.shutdown => self.client_response(response)?,
                         _ => {}
                     }
+                }
+                recv(self.worker.events) -> event => {
+                    self.worker_event(event.context("evaluation worker stopped unexpectedly")?)?;
                 }
                 recv(self.worker.results) -> result => {
                     let result = result.context("evaluation worker stopped unexpectedly")?;
@@ -283,6 +302,8 @@ impl Server<'_> {
             "shutdown" => {
                 self.shutdown = true;
                 self.due = None;
+                self.progress
+                    .finish(self.connection, "Server shutting down")?;
                 self.reject_pending(failure(
                     ErrorCode::RequestCanceled,
                     "server is shutting down",
@@ -330,7 +351,11 @@ impl Server<'_> {
                     Ok(query) => {
                         // Without watched-file support, do not reuse results across
                         // requests that might have unobserved disk changes.
-                        if !self.watching {
+                        if let Some(dependencies) = &self.restored_dependencies {
+                            if !dependencies.matches(&self.config.root, &self.sources()) {
+                                self.changed()?;
+                            }
+                        } else if !self.watching {
                             self.cache = None;
                         }
                         if let Some(cache) = &self.cache {
@@ -394,6 +419,9 @@ impl Server<'_> {
                     serde_json::from_value(notification.params)?;
                 let doc = params.text_document;
                 if let Ok(path) = self.config.relative(&doc.uri) {
+                    let identical = self.restored_dependencies.as_ref().is_some_and(|deps| {
+                        deps.contains_text(&self.config.root.join(&path), &doc.text)
+                    });
                     self.documents.insert(
                         path,
                         Document {
@@ -402,7 +430,9 @@ impl Server<'_> {
                             text: doc.text,
                         },
                     );
-                    self.changed()?;
+                    if !identical {
+                        self.changed()?;
+                    }
                 }
             }
             "textDocument/didChange" => {
@@ -457,6 +487,7 @@ impl Server<'_> {
     fn changed(&mut self) -> Result<()> {
         self.generation += 1;
         self.cache = None;
+        self.restored_dependencies = None;
         self.due = Some(Instant::now() + DEBOUNCE);
         self.reject_pending(failure(
             ErrorCode::ContentModified,
@@ -497,12 +528,15 @@ impl Server<'_> {
         } else {
             return Ok(());
         };
-        let sources = self
-            .documents
-            .iter()
-            .map(|(path, doc)| (path.clone(), doc.text.clone()))
-            .collect();
-        self.worker.jobs.send(Job { params, sources })?;
+        let sources = self.sources();
+        self.worker.jobs.send(Job {
+            params,
+            sources,
+            index: matches!(kind, Kind::Lsp),
+        })?;
+        if matches!(kind, Kind::Lsp) {
+            self.progress.start(Instant::now());
+        }
         self.active = Some(Active {
             generation: self.generation,
             kind,
@@ -510,9 +544,73 @@ impl Server<'_> {
         Ok(())
     }
 
+    fn sources(&self) -> BTreeMap<PathBuf, String> {
+        self.documents
+            .iter()
+            .map(|(path, doc)| (path.clone(), doc.text.clone()))
+            .collect()
+    }
+
+    fn worker_event(&mut self, event: Event) -> Result<()> {
+        if self.shutdown
+            || !self.active.as_ref().is_some_and(|active| {
+                active.generation == self.generation && matches!(active.kind, Kind::Lsp)
+            })
+        {
+            return Ok(());
+        }
+        match event {
+            Event::Status(message) => self.progress.report(self.connection, message)?,
+            Event::Restored(payload) => {
+                // Recheck current overlays/disk on the receiving side before publication.
+                if !payload
+                    .dependencies
+                    .matches(&self.config.root, &self.sources())
+                {
+                    return Ok(());
+                }
+                let values = serde_json::from_value::<Announcements>(payload.output)
+                    .map_err(|error| invalid_output(error.into()));
+                let installed = values.and_then(|values| {
+                    let publications = values.publications(&self.view()).map_err(invalid_output)?;
+                    Ok((values, publications))
+                });
+                match installed {
+                    Ok((values, publications)) => {
+                        self.publish(publications)?;
+                        self.cache = Some(Ok(values));
+                        self.restored_dependencies = Some(payload.dependencies);
+                        self.index_ready = true;
+                        self.progress.report(self.connection,
+                            "Hover, Definition, References and Diagnostics ready from snapshot; warming evaluator")?;
+                        for (id, query) in std::mem::take(&mut self.waiting) {
+                            let result = self
+                                .cache
+                                .as_ref()
+                                .unwrap()
+                                .as_ref()
+                                .map_err(Clone::clone)
+                                .and_then(|values| {
+                                    values.respond(&query, &self.view()).map_err(invalid_output)
+                                });
+                            self.send(id, result)?;
+                        }
+                    }
+                    Err(_) => self.progress.report(
+                        self.connection,
+                        "Invalid snapshot; evaluating project sources",
+                    )?,
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn completed(&mut self, result: Result<Output, ResponseError>) -> Result<()> {
         let active = self.active.take().context("unexpected evaluator result")?;
         if self.shutdown || active.generation != self.generation {
+            // Startup spans superseded attempts; only a current result ends it.
+            // Shutdown already closed any visible progress in request().
             return Ok(());
         }
         match active.kind {
@@ -531,6 +629,11 @@ impl Server<'_> {
             }
             Kind::Command(None) => {}
             Kind::Lsp => {
+                self.restored_dependencies = None;
+                if result.is_ok() {
+                    self.progress
+                        .report(self.connection, "Installing announcements")?;
+                }
                 let view = self.view();
                 let values = result.and_then(|output| {
                     for warning in output.warnings {
@@ -553,6 +656,16 @@ impl Server<'_> {
                         Err(error)
                     }
                 });
+                let ready = self.cache.as_ref().is_some_and(Result::is_ok);
+                self.index_ready |= ready;
+                self.progress.finish(
+                    self.connection,
+                    if ready {
+                        "Knowledge index ready"
+                    } else {
+                        "Knowledge index update failed; see server log"
+                    },
+                )?;
                 // A request arriving during evaluation can have set this again.
                 self.due = None;
                 for (id, query) in std::mem::take(&mut self.waiting) {
@@ -651,6 +764,7 @@ impl Server<'_> {
     }
 
     fn client_response(&mut self, response: Response) -> Result<()> {
+        self.progress.response(self.connection, &response)?;
         if response.id == RequestId::from(WATCH_ID.to_owned()) {
             self.watching = response.error.is_none();
             if let Some(error) = response.error {
