@@ -10,7 +10,7 @@ From the workspace root:
 source scripts/dev.sh
 ```
 
-This links Core, the Typst LSP wrapper, and Kickstart into `.dev/packages/preview/` and sets `TYPST_PACKAGE_PATH` for the current shell. Typst, `zettyp-eval`, and `zettyp-lsp` then resolve the usual `@preview` imports without extra package-path flags. No global package installation or shell configuration is changed.
+This assembles local packages in `.dev/packages/preview/`, links their source files, and sets `TYPST_PACKAGE_PATH` for the current shell. Core includes the Kickstart template; the LSP and Site wrappers remain separate packages. Typst, `zettyp-eval`, and `zettyp-lsp` then resolve the usual `@preview` imports without extra package-path flags. No global package installation or shell configuration is changed.
 
 Run it again in each new shell, or after changing a package version or moving the repository. Source changes are immediately visible through the links; running processes may still need a refresh or restart.
 
@@ -20,7 +20,7 @@ To check copied packages instead of live links:
 python3 scripts/install-local.py
 ```
 
-This replaces the current-version links with copies without modifying their source directories. Rerun after source changes; `source scripts/dev.sh` switches back to links. Link mode requires permission to create directory symlinks.
+This replaces the current-version links with copies without modifying their source directories. Rerun after source changes; `source scripts/dev.sh` switches back to links. Link mode requires permission to create file symlinks.
 
 ## Typst and Kickstart
 
@@ -30,15 +30,13 @@ Edit the template directly during development:
 typst watch --root kickstart/template kickstart/template/index.typ .dev/kickstart.pdf
 ```
 
-To check the initialized project, choose a directory that does not exist:
+Core and Kickstart remain separate source directories but are distributed together as `zettyp-core`. To assemble release directories with copied files:
 
 ```sh
-typst init @preview/zettyp-kickstart:0.1.0 .dev/my-notes
-cd .dev/my-notes
-typst watch index.typ
+python3 scripts/package_typst.py
 ```
 
-`typst init` copies the template. Later edits to `kickstart/template/` do not update that generated project. Return to the workspace root for the commands below.
+The output is `.dev/dist/preview/`, containing Core with its template and the LSP wrapper. Generated files should not be edited or committed.
 
 ## Rust tools
 
