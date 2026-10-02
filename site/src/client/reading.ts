@@ -11,19 +11,36 @@ export function initPreview() {
   popover.className = 'zk-preview';
   popover.hidden = true;
   document.body.append(popover);
-  let timer = 0;
-  let current: HTMLElement | null = null;
-  // The pane holding the link whose preview is shown: its links open beside it.
-  let origin: HTMLElement | undefined;
-  // A clicked link was read, not glanced at: no preview until the pointer leaves it.
-  let spent: Element | null = null;
+  type Link = NonNullable<ReturnType<typeof zkLink>>;
+  type Session = {
+    link: Link;
+    origin: HTMLElement;
+    phase: 'waiting' | 'loading' | 'visible' | 'cancelled';
+    showTimer?: number;
+    leaveTimer?: number;
+  };
+  let session: Session | undefined;
 
-  const hide = () => {
-    clearTimeout(timer);
-    timer = window.setTimeout(() => {
-      popover.hidden = true;
-      current = null;
-    }, 180);
+  // Normalize DOM descendants to a semantic link before comparing boundaries.
+  const paneLink = (target: EventTarget | null) =>
+    target instanceof Element && target.closest('.zk-pane') ? zkLink(target) : undefined;
+  const inPopover = (target: EventTarget | null) =>
+    target instanceof Node && !popover.hidden && popover.contains(target);
+  const clearTimers = (active: Session) => {
+    clearTimeout(active.showTimer);
+    clearTimeout(active.leaveTimer);
+  };
+  const end = () => {
+    if (session) clearTimers(session);
+    session = undefined;
+    popover.hidden = true;
+  };
+  const cancel = () => {
+    if (!session) return;
+    clearTimers(session);
+    // Cancellation belongs only to this visit, never to the destination card.
+    session.phase = 'cancelled';
+    popover.hidden = true;
   };
   const place = (link: HTMLElement) => {
     const box = link.getBoundingClientRect();
@@ -34,52 +51,83 @@ export function initPreview() {
     popover.style.bottom = below ? '' : `${innerHeight - box.top + 6}px`;
   };
 
-  document.addEventListener('mouseover', event => {
-    if (!hoverable.matches) return;
-    const target = event.target as Element;
-    if (popover.contains(target)) { clearTimeout(timer); return; }
-    // Links in the popover are not panes' links: previews do not nest.
-    const found = target.closest('.zk-pane') ? zkLink(target) : undefined;
-    if (!found) return;
-    const { element: link, entry, source } = found;
-    if (link === current || link === spent) return;
-    // A link to another card previews it; a card's links to itself tell about it.
-    const view = source === entry.id ? 'about' : 'preview';
-    clearTimeout(timer);
-    timer = window.setTimeout(async () => {
-      current = link;
+  const begin = (link: Link) => {
+    end();
+    const active: Session = {
+      link,
+      origin: link.element.closest<HTMLElement>('.zk-pane')!,
+      phase: 'waiting',
+    };
+    session = active;
+    active.showTimer = window.setTimeout(async () => {
+      active.phase = 'loading';
       try {
-        const preview = await fetchView(entry, view);
-        if (current !== link || !preview) return;
-        origin = link.closest<HTMLElement>('.zk-pane') ?? undefined;
+        // Self-links show metadata; other links show the target's preview.
+        const view = link.source === link.entry.id ? 'about' : 'preview';
+        const preview = await fetchView(link.entry, view);
+        // Session identity, not link identity, owns the async result.
+        if (session !== active || session.phase !== 'loading') return;
+        if (!preview || !link.element.isConnected) { end(); return; }
         popover.replaceChildren(preview);
+        active.phase = 'visible';
         popover.hidden = false;
         popover.scrollTop = 0;
-        place(link);
+        place(link.element);
       } catch (error) {
+        if (session === active && session.phase === 'loading') end();
         console.error(error);
       }
     }, 350);
+  };
+
+  document.addEventListener('mouseover', event => {
+    if (!hoverable.matches) return;
+    if (inPopover(event.target)) {
+      if (session) clearTimeout(session.leaveTimer);
+      return; // Preview links never start nested previews.
+    }
+    const link = paneLink(event.target);
+    if (!link) return;
+    if (session?.link.element === link.element) {
+      clearTimeout(session.leaveTimer);
+      return;
+    }
+    begin(link);
   });
   document.addEventListener('mouseout', event => {
-    const target = event.target as Element;
-    const into = event.relatedTarget as Element | null;
-    if (spent && target === spent && !(into && spent.contains(into))) spent = null;
-    if ((target.closest('[data-zk-target]') || popover.contains(target)) && !(into && popover.contains(into))) hide();
+    const active = session;
+    if (!active) return;
+    const fromLink = paneLink(event.target)?.element === active.link.element;
+    if (!fromLink && !inPopover(event.target)) return;
+    if (paneLink(event.relatedTarget)?.element === active.link.element || inPopover(event.relatedTarget)) return;
+    // Only a visible preview needs a grace period to cross the gap into it.
+    // Waiting/loading/cancelled visits end immediately on semantic exit.
+    if (active.phase !== 'visible') { end(); return; }
+    clearTimeout(active.leaveTimer);
+    active.leaveTimer = window.setTimeout(() => {
+      if (session === active) end();
+    }, 180);
   });
   // A note link in the preview continues the reading path from the source pane.
   popover.addEventListener('click', event => {
     const found = zkLink(event.target);
+    const origin = session?.origin;
+    // Closing the surface under the pointer ends this visit altogether.
+    end();
     if (!found || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     open(found.entry, origin);
   });
   document.addEventListener('click', event => {
-    clearTimeout(timer);
-    spent = (event.target as Element).closest('[data-zk-target]');
-    popover.hidden = true;
-    current = null;
+    if (!session || inPopover(event.target)) return;
+    const onSource = paneLink(event.target)?.element === session.link.element;
+    if (onSource) cancel();
+    else end();
   }, true);
+  // Losing the pointer context ends the visit, including click suppression.
+  window.addEventListener('blur', end);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) end(); });
+  hoverable.addEventListener('change', () => { if (!hoverable.matches) end(); });
 }
 
 // A collapsed tree names its card in `data-zk-expand`.
