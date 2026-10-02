@@ -1,5 +1,5 @@
-mod snapshot_tests;
 mod host_tests;
+mod snapshot_tests;
 
 use super::*;
 use crossbeam_channel::unbounded;
