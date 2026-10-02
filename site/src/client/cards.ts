@@ -1,6 +1,7 @@
 // Loading rendered cards from their canonical pages. Nothing here interprets
 // knowledge semantics: Typst lays out each card as `section[data-zk-node]` and
 // names the target note of every note link with `[data-zk-target]`.
+import { loadPage, rememberPage } from './pages.mjs';
 
 export type Entry = { id: string; route: string; title: string };
 
@@ -31,24 +32,34 @@ export function zkLink(target: EventTarget | null) {
   return { element, entry, source: element.dataset.zkSource };
 }
 
-const documents = new Map<string, Promise<Document>>();
-function load(url: URL): Promise<Document> {
-  const key = url.pathname;
-  if (!documents.has(key)) {
-    documents.set(key, fetch(url.pathname)
-      .then(response => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}: ${url.pathname}`);
-        return response.text();
-      })
-      .then(text => new DOMParser().parseFromString(text, 'text/html'))
-      .catch(error => { documents.delete(key); throw error; }));
-  }
-  return documents.get(key)!;
-}
-
 /** Start loading a card's page before it is needed. */
 export function prefetch(entry: Entry) {
-  load(routeURL(entry)).catch(() => {});
+  // Hover is an interactive request, even though it has no visible result yet.
+  loadPage(routeURL(entry)).catch(() => {});
+}
+
+/** Prepare direct note destinations in the reading stack, including backmatter. */
+export function initPrefetch(root: HTMLElement) {
+  const home = root.querySelector<HTMLElement>(':scope > .zk-pane[data-page]');
+  if (home?.dataset.page) rememberPage(new URL(home.dataset.page, siteRoot), document);
+  const prepare = (within: Element) => {
+    const links = [within, ...within.querySelectorAll<HTMLElement>('[data-zk-target], [data-zk-expand]')];
+    for (const link of links) {
+      const id = link.getAttribute('data-zk-target') ?? link.getAttribute('data-zk-expand');
+      const entry = id && entries.get(id);
+      if (entry) loadPage(routeURL(entry), true).catch(() => {});
+    }
+  };
+  // Observe only the live reading surface. Detached prefetched pages and hover
+  // templates never trigger recursive preloading of their own neighbours.
+  manifest.then(() => {
+    prepare(root);
+    new MutationObserver(records => {
+      for (const record of records) for (const node of record.addedNodes) {
+        if (node instanceof Element && root.contains(node)) prepare(node);
+      }
+    }).observe(root, { childList: true, subtree: true });
+  });
 }
 
 let instances = 0;
@@ -87,8 +98,12 @@ export function relocate(root: Element, source: URL) {
 }
 
 async function findCard(entry: Entry) {
-  const page = await load(routeURL(entry));
-  const found = page.querySelector(`section[data-zk-node="${CSS.escape(entry.id)}"]`);
+  const page = await loadPage(routeURL(entry));
+  const selector = `section[data-zk-node="${CSS.escape(entry.id)}"]`;
+  // The remembered live page can contain expanded copies: prefer its original
+  // top-level cards, whose pane alone carries the canonical data-page mark.
+  const found = page.querySelector(`.zk-pane[data-page] > article > ${selector}`)
+    ?? page.querySelector(selector);
   if (!found) throw new Error(`No card ${entry.id} in ${entry.route}`);
   return found;
 }
