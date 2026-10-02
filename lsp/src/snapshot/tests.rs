@@ -1,6 +1,8 @@
 use super::*;
+#[cfg(unix)]
 use typst::foundations::Dict;
 
+#[cfg(unix)]
 fn fixture() -> Result<(tempfile::TempDir, Runtime, Store, EvalParams, Payload)> {
     let dir = tempfile::tempdir()?;
     let root = dir.path().join("project");
@@ -38,6 +40,7 @@ fn fixture() -> Result<(tempfile::TempDir, Runtime, Store, EvalParams, Payload)>
 }
 
 #[test]
+#[cfg(unix)]
 fn roundtrip_is_private_and_source_change_or_inputs_miss() -> Result<()> {
     let (_dir, runtime, store, params, payload) = fixture()?;
     store.save(&params, payload, &BTreeMap::new())?;
@@ -73,6 +76,7 @@ fn roundtrip_is_private_and_source_change_or_inputs_miss() -> Result<()> {
 }
 
 #[test]
+#[cfg(unix)]
 fn corrupt_checksum_and_unsupported_version_are_misses() -> Result<()> {
     let (_dir, runtime, store, params, payload) = fixture()?;
     store.save(&params, payload, &BTreeMap::new())?;
@@ -94,6 +98,7 @@ fn corrupt_checksum_and_unsupported_version_are_misses() -> Result<()> {
 }
 
 #[test]
+#[cfg(unix)]
 fn unsaved_and_unsupported_snapshots_are_not_written() -> Result<()> {
     let (_dir, _runtime, store, params, mut payload) = fixture()?;
     let different = BTreeMap::from([("main.typ".into(), "unsaved".into())]);
@@ -137,6 +142,7 @@ fn public_or_symlinked_files_are_rejected() -> Result<()> {
 }
 
 #[test]
+#[cfg(unix)]
 fn oversized_snapshots_are_rejected_before_reading() -> Result<()> {
     let (_dir, runtime, store, params, payload) = fixture()?;
     store.save(&params, payload, &BTreeMap::new())?;
@@ -148,5 +154,23 @@ fn oversized_snapshots_are_rejected_before_reading() -> Result<()> {
         .open(path)?
         .set_len(MAX_BYTES + 1)?;
     assert!(store.load(&runtime, &params, &BTreeMap::new()).is_err());
+    Ok(())
+}
+
+#[test]
+#[cfg(not(unix))]
+fn private_storage_is_unsupported_without_creating_files() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let directory = dir.path().join("snapshots");
+    let path = directory.join("snapshot.json");
+    for result in [private_directory(&directory), private_file(&path)] {
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "private snapshot storage unsupported on this platform"
+        );
+    }
+    assert!(!directory.exists());
+    assert_eq!(fs::read_dir(dir.path())?.count(), 0);
+    assert!(Store::new(&dir.path().canonicalize()?, &WorldOptions::default()).is_err());
     Ok(())
 }

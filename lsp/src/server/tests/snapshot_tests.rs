@@ -128,3 +128,86 @@ fn late_snapshot_after_change_is_not_installed_and_error_drops_old_success() -> 
     assert!(server.restored_dependencies.is_none());
     Ok(())
 }
+
+#[test]
+#[cfg(not(unix))]
+fn unsupported_storage_evaluates_sources_and_answers_queued_hover() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let root = dir.path().canonicalize()?;
+    std::fs::write(
+        root.join("main.typ"),
+        r#"#metadata((tag: label("lsp.hover"), value: (
+  applies-to: (source: sys.inputs.source, range-utf16: (
+    start: (line: 0, character: 0), end: (line: 0, character: 8),
+  )),
+  contents: (kind: "plaintext", value: "fresh hover"),
+)))<eval.announcement>"#,
+    )?;
+    let (connection, client) = Connection::memory();
+    let (mut server, _jobs) = server(&connection);
+    server.config.root = root.clone();
+    server.config.client_root = root.clone();
+    server.config.evaluation = EvalParams {
+        entry: "main.typ".into(),
+        inputs: BTreeMap::from([(
+            "source".into(),
+            root.join("main.typ").to_str().unwrap().into(),
+        )]),
+    };
+    server.worker = Worker::start(
+        root.clone(),
+        WorldOptions {
+            ignore_system_fonts: true,
+            ..Default::default()
+        },
+    )?;
+    begin(&mut server, &client)?;
+    server.request(hover(&root))?;
+    assert!(server.cache.is_none());
+    assert!(server.waiting.contains_key(&RequestId::from(42)));
+
+    let result = server
+        .worker
+        .results
+        .recv_timeout(Duration::from_secs(30))?;
+    // Receiving the result also synchronizes the preceding restore attempt.
+    let mut cold_start = false;
+    for event in server.worker.events.try_iter().collect::<Vec<_>>() {
+        match &event {
+            Event::Status("No valid snapshot; evaluating project sources") => cold_start = true,
+            Event::Status(_) => {}
+            Event::Restored(_) => panic!("unsupported storage restored a snapshot"),
+        }
+        server.worker_event(event)?;
+    }
+    assert!(cold_start);
+    progress_values(&client);
+    server.completed(result)?;
+    assert!(server.index_ready);
+    assert!(server.cache.as_ref().unwrap().is_ok());
+    assert!(server.restored_dependencies.is_none());
+    assert!(server.waiting.is_empty());
+
+    // The queued query and a later query both use the freshly evaluated index.
+    for queued in [true, false] {
+        if !queued {
+            server.request(hover(&root))?;
+        }
+        let responses: Vec<_> = client
+            .receiver
+            .try_iter()
+            .filter_map(|message| match message {
+                Message::Response(response) => Some(response),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].id, RequestId::from(42));
+        assert!(responses[0].error.is_none());
+        assert_eq!(
+            responses[0].result.as_ref().unwrap()["contents"]["value"],
+            "fresh hover"
+        );
+    }
+    Ok(())
+}
